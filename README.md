@@ -140,6 +140,7 @@ F:\DataInput\
 ## 配置说明（.env 与 Cookie）
 
 所有敏感配置通过 `.env` 文件注入，字段定义见 [config.py](file:///f:/project/spider_TRAE/config.py) 和 [README_CONFIG.md](file:///f:/project/spider_TRAE/README_CONFIG.md)。
+.env文件需要你自己在项目文件夹创建，并且填写你自己的配置。详细教程请参考 [README_CONFIG.md](file:///f:/project/spider_TRAE/README_CONFIG.md)。
 
 关键字段包括：
 - B站：`BILI_SESSDATA`, `BILI_JCT`, `BILI_BUVID3`, `BILI_MEDIA_ID`

@@ -2,6 +2,31 @@
 
 本指南说明如何获取 `.env` 文件中所需的各项 Cookie 和 ID 配置。请使用 Chrome 或 Edge 浏览器按步骤操作。
 
+示例：?为你需要填写的内容
+```
+# Security
+BILI_SESSDATA=?
+BILI_JCT=?
+BILI_BUVID3=?
+BILI_MEDIA_ID=?
+
+DOUYIN_COOKIE=?
+# tt_webid, sessionid are crucial
+
+XHS_COOKIE=?
+# a1, web_session
+
+WECHAT_URLS_FILE=？（例如：F:\DataInput\wechat_urls.txt）
+# Optional: Path to local WeChat DB
+WECHAT_DB_PATH=
+
+# System
+LOG_LEVEL=？（例如：INFO）
+SAVE_PATH=？（例如：F:\DataInput）
+CRON_TIME=？（例如：22:00）
+```
+
+
 ## 1. Bilibili (B站)
 
 我们需要获取 `SESSDATA`, `bili_jct`, `buvid3` 以及目标的 `media_id`。
