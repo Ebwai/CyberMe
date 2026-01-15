@@ -1,5 +1,15 @@
 # History Record (history_log.md)
 
+## 2026-01-15 03:10 | 更新 GitHub README 头图为本地图片
+### 1. 问题记录
+用户将 `github_demo_picture.jpg` 放在 `pictures` 目录下，希望 GitHub 仓库首页直接展示该实际图片，而不是之前的占位链接。
+### 2. 原因分析
+*   **一致性需求**: [需求增加] README 中的头图应与项目仓库内真实资源一致，方便后续维护与替换。{问题确信度: High}
+### 3. 解决方案
+*   **README 调整**: 将 `README.md` 中头图链接修改为相对路径 `pictures/github_demo_picture.jpg`，确保 GitHub 渲染时可以直接加载本地图片资源。
+
+---
+
 ## 2026-01-15 02:55 | 完善 GitHub 仓库文档与品牌化
 ### 1. 问题记录
 用户需要生成一个 GitHub 仓库专用的头图描述，并将 "cyberme" 的核心宗旨置顶于 `README.md`。

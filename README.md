@@ -2,7 +2,7 @@
 
 > **创造你的一个赛博分身，既拥有大模型的通用知识，又拥有你的所有信息（没错，是所有，不止是表层的知识比如如你的银行卡密码doge，更是你的内在，只要你愿意分享），并且接入了各种工具，使得你只需要发出指令，cyberme就可以像你一样（或者说就是你）在赛博世界做任何事（没错，任何事，只要你愿意）**
 
-![CyberMe Header Image](https://placeholder-image-url-or-generate-your-own.com/cyberme-header.png)
+![CyberMe Header Image](pictures/github_demo_picture.jpg)
 *(建议头图风格：一个极简的、未来感的数字人形轮廓，正与流动的数据流融合，背景是深色的赛博朋克城市景观。核心散发着柔和的智慧蓝光，象征着被数字化的“内在自我”。)*
 
 ## 项目概览
@@ -316,4 +316,3 @@ python -m processor.main
   - 再结合 `logs/spider_*.log` 定位具体平台与模块。
 
 如需扩展到新的平台或引入新的处理流程，可以复用 `BaseCrawler` + `MediaTool` + `processor/main.py` 的现有模式进行迭代。
-
