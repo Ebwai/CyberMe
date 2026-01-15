@@ -205,6 +205,99 @@ python -m processor.main
 2. 操作中选择“启动程序”，指向对应 `.bat` 文件。
 3. 确保任务运行账户有访问 `F:\DataInput` 和 Conda 环境的权限。
 
+### 4. 历史收藏回填任务（backfill_favorites.py）
+
+在日常 22:00 增量采集之外，你可以使用 [backfill_favorites.py](file:///f:/project/spider_TRAE/backfill_favorites.py) 对“历史收藏夹”进行补抓，适合以下场景：
+- 项目刚部署，需要把过往收藏一次性补齐；
+- 已经跑了一段时间的每日增量任务，但中间有一段时间未运行，需要补那段时间的收藏；
+- 只想对某个平台做历史补抓，而其他平台维持现状。
+
+#### 4.1 基本用法
+
+在 Conda 环境 `yolov5` 中，进入项目根目录：
+
+```bash
+conda activate yolov5
+cd f:\project\spider_TRAE
+python backfill_favorites.py
+```
+
+- 默认会同时回填：`Bilibili, Xiaohongshu, Douyin, WeChat` 四个平台；
+- 每个平台都有独立的“每次最多抓取条数”：
+  - `--limit-bili`：单次 B站最多抓取多少条（默认 30）；
+  - `--limit-xhs`：单次小红书最多抓取多少条（默认 30）；
+  - `--limit-douyin`：单次抖音最多抓取多少条（默认 10）；
+  - `--limit-wechat`：单次微信最多抓取多少条（默认 30）。
+
+你也可以只回填部分平台，例如：
+
+```bash
+# 仅回填 B站与小红书（适合先补这两个平台）
+python backfill_favorites.py --platforms Bilibili,Xiaohongshu
+
+# 仅补抖音，且每次只补 5 条，方便观察效果
+python backfill_favorites.py --platforms Douyin --limit-douyin 5
+```
+
+脚本运行日志会写入 `logs/backfill_YYYY-MM-DD.log`，方便你观察进度。
+
+#### 4.2 各平台回填策略概览
+
+- Bilibili  
+  - 使用官方 Web 收藏夹接口（`/x/v3/fav/resource/list`）获取总数与分页数据；  
+  - 每次从“最旧的一页”开始向前补抓，并在本次运行中按收藏时间从旧到新依次保存；  
+  - 通过 `backfill_state.json` 记录已经处理过的 `bvid`、当前页码 `pn` 和页内索引 `idx`，支持多次分批运行。
+
+- Xiaohongshu  
+  - 基于 `local_knowledge_base/Spider_XHS` 提供的 API 读取收藏夹笔记列表；  
+  - 会先尝试统计收藏总数（日志中显示“Xiaohongshu 收藏夹总数: N 条”），统计失败时会以“总数未知”模式运行；  
+  - 按接口返回的光标（cursor）向更早的收藏推进，并记录 `cursor` 与已处理的 `note_id` 集合，支持多次分批补抓。
+
+- Douyin  
+  - 复用日常爬虫中的 `fetch_new_contents` 能力，获取当前收藏夹中的所有可见内容；  
+  - 按 `publish_time` 从旧到新排序后，仅对尚未出现在回填状态中的内容执行保存；  
+  - 由于抖音收藏接口本身不提供稳定的“总数”字段，所以日志中会显示“总数未知”。
+
+- WeChat  
+  - 从 `.env` 中配置的 `WECHAT_URLS_FILE` 读取文章 URL 列表；  
+  - 仅对从未处理过的 URL 执行抓取与保存，已处理 URL 会在回填状态中标记。
+
+所有平台的回填状态统一保存在 `SAVE_PATH` 根目录下的 `backfill_state.json`（默认路径：`F:\DataInput\backfill_state.json`）。
+
+#### 4.3 与每日增量去重的关系与最佳实践
+
+日常 22:00 采集任务通过两层机制保证增量去重：
+- 每个平台内部的 Sync-Point（最后一次成功抓取的收藏 ID）；  
+- 当日目录下基于“文件是否已存在”的兜底检查（见 [crawlers/base.py](file:///f:/project/spider_TRAE/crawlers/base.py#L46-L88)）。
+
+回填脚本则采用“平台内已处理 ID 集合”的方式进行去重：
+- B站 / 小红书 / 抖音：在 `backfill_state.json` 中维护 `processed_ids` 集合；  
+- 微信：在 `backfill_state.json` 中维护 `processed_urls` 集合；  
+- 同一平台的同一条收藏，只要已经出现在对应集合中，再次运行回填脚本时就会被跳过。
+
+需要注意的是：**回填脚本不会复用日常任务的 Sync-Point**，两者的状态是彼此独立的。这意味着：
+- 若同一个收藏已被“日常任务”抓取过，但尚未出现在回填脚本的 `processed_ids` 中，回填脚本会再次对其发起抓取请求；  
+- 在磁盘层面，由于输出路径按“日期/平台/作者_标题”分层，相同帖子如果在不同日期被抓取，会分别出现在不同日期的目录下；同一天内不会生成多份相同帖子的 Markdown；  
+- 在网络请求与平台风控层面，这是一次“重复抓取”，会消耗额外的请求额度。
+
+为了尽可能减少与每日增量任务的重复抓取，推荐如下实践顺序：
+- **首次部署项目**  
+  1. 先完成 `.env` 配置与环境验证；  
+  2. 暂时不要开启 Windows 计划任务；  
+  3. 多次运行 `backfill_favorites.py`，适当调整 `--limit-*` 参数，直到日志中显示 B站 / 小红书等平台“累计已爬取收藏夹内容”已经基本覆盖历史收藏；  
+  4. 再开启 22:00 / 23:00 的每日增量任务。
+
+- **已经运行了一段时间的老项目**  
+  - 若只是偶尔补一小段历史（例如你在某个平台新建了一个收藏夹，并希望把旧内容也补上），可以：  
+    - 在当天任意时间手动运行 `backfill_favorites.py`，并把对应平台的 `--limit-*` 参数设置得较小（如 5~20 条）；  
+    - 观察 `logs/backfill_*.log` 中的“累计已爬取”进度，分多次补完；  
+    - 即使个别内容与日常任务有交集，也只是覆盖写入同一份 Markdown，不会在磁盘上产生大量重复文件。
+
+- **避免严重重复抓取的几个不要**  
+  - 不要随意删除 `backfill_state.json`，除非你明确希望“从头重新回填”；  
+  - 不要在同一天频繁切换 `.env` 中的收藏夹 ID（例如频繁改动 `BILI_MEDIA_ID`），否则可能导致状态与实际收藏范围不一致；  
+  - 不要在多台机器上同时对同一份收藏运行回填脚本而共享同一个输出目录，否则会互相覆盖。
+
 ---
 
 ## 模块功能速览
