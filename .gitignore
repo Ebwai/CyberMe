@@ -1,6 +1,7 @@
 # secrets & sensitive config
 .env
 local_knowledge_base/Spider_XHS/.env
+local_knowledge_base/Spider_XHS/
 
 # logs and runtime outputs
 logs/
@@ -20,4 +21,3 @@ __pycache__/
 
 # large or temporary data files
 *.wav
-
