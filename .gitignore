@@ -1,0 +1,23 @@
+# secrets & sensitive config
+.env
+local_knowledge_base/Spider_XHS/.env
+
+# logs and runtime outputs
+logs/
+*.log
+env_check.log
+verify_log.txt
+whisper_device_check.log
+debug_out.txt
+test_out.txt
+
+# python cache
+__pycache__/
+*.pyc
+
+# tool / editor metadata
+.trae/
+
+# large or temporary data files
+*.wav
+

@@ -1,0 +1,30 @@
+# Core & Scheduling
+apscheduler
+loguru
+pydantic
+pydantic-settings
+python-dotenv
+
+# Networking & API
+aiohttp
+aiofiles
+requests
+bilibili-api-python
+playwright
+
+# Data Processing & Parsing
+beautifulsoup4
+lxml
+html2text
+PyExecJS
+jinja2
+openpyxl
+retry
+
+# AI & Media (Transcription & OCR)
+openai-whisper
+yt-dlp
+torch
+torchvision
+torchaudio
+easyocr

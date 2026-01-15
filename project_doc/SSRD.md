@@ -1,0 +1,85 @@
+# 软件系统需求定义 (SSRD)
+
+## 1. 上层抽象需求
+本系统旨在建立一个自动化的内容聚合管道，每日定时（22:00）检查用户在四大主流内容平台（B站、抖音、小红书、微信公众号）的**“收藏夹”**（仅限收藏夹，不包含关注更新），识别当日新添加的内容，并将其核心信息（元数据、正文、字幕/文稿、媒体链接）抓取并存储为结构化文件，最终输出到本地指定目录 `F:\DataInput`。
+
+### 关键目标：
+- **全自动化**：无需人工干预的每日增量抓取。
+- **多模态覆盖**：图文、视频信息（重点在字幕/文稿）、链接。
+- **双重格式输出**：
+    - **RAG 友好格式**: 结构化数据（如包含 Frontmatter 的 Markdown 或 JSON），便于分割和向量化。
+    - **人类可读格式**: 排版整洁、图文并茂的 Markdown 或 HTML 报告，便于用户直接阅读。
+
+## 2. 行业案例调研与参考
+根据 `local_knowledge_base` 中的调研资料及 Spider_XHS 项目分析：
+
+### 2.1 小红书 (Xiaohongshu)
+- **技术现状**: 网页版存在强风控（x-s, x-t, x-s-common 签名）。
+- **行业成熟方案**:
+    - *JS 逆向 (Pure calculation)*: `Spider_XHS` 和 `xhshow` 项目通过 Python 实现 JS 签名逻辑，速度快但维护成本高。
+    - *自动化 (Automation)*: `MediaCrawler` 使用 Playwright 开启 CDP 模式，通过 `page.evaluate` 注入 JS 获取签名，稳定性更强。
+- **本项目策略**: 首选复用 `local_knowledge_base/Spider_XHS` 的纯算逻辑。若遇 461/403 错误，降级切换至 Playwright 方案。
+- **参考**: `local_knowledge_base/Spider_XHS`
+
+### 2.2 多模态处理要求
+- **B站**: fallback 音频下载 (22:00) + Whisper GPU 转写 (23:00)。
+- **小红书**: 视频下载 (22:00) -> 音频提取 (23:00) -> Whisper GPU 转写 (23:00)。
+- **小红书**: 图片下载 (22:00) -> EasyOCR GPU 识别 (23:00) -> 结果追加至 MD。
+- **处理范围限制 (Scope Restriction)**: 
+    - **OCR**: 仅对小红书 (Xiaohongshu) 执行。
+    - **语音转译**: 仅对 B站 (Bilibili) 和 小红书 (Xiaohongshu) 执行。
+- **通用能力**: 建立可复用的音频提取与 OCR 识别模块，支持未来更多平台的需求。
+- **Bilibili (B站) 核心需求**: 收藏夹视频 + 字幕。
+- **Bilibili (B站) 技术路径**:
+    - *列表获取*: API `https://api.bilibili.com/x/v3/fav/resource/list`。需参数 `media_id` (收藏夹ID), `pn`, `ps`。需有效 `SESSDATA` Cookie。
+    - *字幕获取*: API `https://api.bilibili.com/x/player/v2` (Web端) 或 Protobuf 接口。`bilibili-api-python` 库已封装好字幕下载功能 (`save_subtitle` 方法)。
+- **高级字幕识别方案 (2025-2026 最新调研)**:
+    - *ASR 语音识别*: 针对无官方字幕的视频。
+    - [✓] **采集阶段**: 22:00 仅执行音频下载，将 `.wav` 音频文件与 `.md` 文件一同存储于帖子专属文件夹中。
+    - [✓] **处理阶段**: 23:00 扫描当日文件夹，发现音频文件后调用本地 GPU 加速的 Whisper 模型进行离线转写，并将结果追加到 Markdown 中。
+    - [✓] **解耦合**: 爬虫与 AI 计算分离，确保爬虫的高并发与稳定性，同时利用闲时算力进行转写。
+    - *OCR 硬字幕提取*: 针对有硬嵌字幕但无外挂字幕的视频。
+        - **RapidVideOCR**: 基于 PaddleOCR，快速提取硬字幕。
+    - *最佳组合策略*: `yt-dlp` (下载音频) + `Faster-Whisper` (本地识别/OpenAI API)。
+- **行业案例**: `BBDown` 为行业标杆，但其为 C# 编写。Python 侧推荐使用 `bilibili-api-python` 库。
+- **引用**: `[pypi/bilibili-api-python]`, `[local_knowledge_base/B 站无字幕视频字幕识别方案深度解析（2025-2026 最新）.md]`
+
+### 2.3 抖音 (Douyin)
+- **核心需求**: 收藏夹列表 + 视频无水印下载 + 字幕。
+- **技术壁垒**: `a_bogus`, `msToken`, `tty` 等加密参数。Web 端风控最严。
+- **最新方案 (2025)**:
+    - *签名服务*: 搭建 Node.js 签名服务或使用 MediaCrawler 的 Playwright 注入方式生成 `a_bogus`。
+    - *详情页解析*: 通过 `www.douyin.com/aweme/v1/web/aweme/detail/` 接口获取。
+    - *字幕*: JSON 响应中通常包含 `caption` 字段（SRT 内容或 URL）。
+- **本项目策略**: 不重复造轮子逆向 `a_bogus`，直接采用 Playwright + Stealth 模拟浏览或注入 JS 签名的方式。
+
+### 2.4 微信公众号 (WeChat Official Accounts)
+- **核心需求**: 获取“我的收藏”中的文章。
+- **行业痛点**: 微信 Web 端 (wx.qq.com) 已阉割大部分功能；PC 客户端接口私有加密。无开放的“获取我的收藏” API。
+- **可行方案分析**:
+    - *方案 A (官方导出)*: 手动请求导出个人数据（耗时数天，不可行）。
+    - *方案 B (Mitmproxy)*: 手机挂代理，点击收藏夹，抓包获取链接（需人工每日操作，不符合自动化需求）。
+    - *方案 C (PC Local DB)*: 解析 Windows 端微信本地数据库 `Favorites.db`。需要绕过 SQLCipher 加密（需获取密钥）。
+    - *方案 D (Hook)*: 使用 `WeChatOpen/WeChat-PyRobot` 等 Hook 工具（风险高，易封号）。
+- **本项目策略 (妥协方案)**:
+    1. 优先尝试 PC 端本地数据库解析 (需用户并在 PC 端登录)。
+    2. 若不可行，则退化为 **读取指定文件夹下的文本文件** (即用户手动将链接复制到 `urls.txt`，脚本只负责抓取正文)。
+    3. *正文抓取*: 使用 Selenium/Playwright 访问 `mp.weixin.qq.com` 链接，通过 BeautifulSoup 清洗 HTML 结构。
+### 2.5 增量与重定向 (去重策略调研)
+- **方案 A (文件系统特征码)**: 遍历磁盘检查文件名。优点是无需额外驱动，缺点是对于海量数据速度慢。当前临时方案即采用此法。
+- **方案 B (SQLite 持久化跟踪)**: 
+    - *技术细节*: 使用本地 SQLite 数据库存储 `{platform, item_id, processed_at}`。
+    - *优势*: 支持跨日期全局唯一识别，即使文件被移动或重命名，只要 ID 存在即可去重。支持百万级数据秒级查询。
+    - *劣势*: 逻辑相对臃肿，增加了外部文件依赖，对简单的小工具而言略显“重”。
+- **方案 C (有序停止法 - 思路中)**: 利用 API 收藏时间倒序排列的特性，遇到首个已存在文件即停止该平台爬取。
+
+## 3. 引用与思考
+- **小红书图片 403**: [Reason] 图片服务器校验 Referer。必须在 Request Header 中伪造 Referer 为 `https://www.xiaohongshu.com/`。
+- **B站 AI 字幕**: [Reason] B站内部有 AI 字幕但不一定公开 API。最稳妥方案是下载音频后本地 Whisper 识别，但成本高。妥协方案：优先 API 获取 `ai-zh` 语言轨道。
+- **微信收藏获取**: [Thinking] 由于微信生态封闭，全自动获取“收藏列表”难度极高且风险大。接受“半自动”方案（用户手动复制链接）是当前最务实的选择。
+- **需求追踪状态**:
+  - [✓] B站抓取模块 (获取列表, 提取元数据, 提取字幕)
+  - [✓] 抖音抓取模块 (获取列表, 提取元数据, 提取字幕)
+  - [✓] 小红书抓取模块 (整合代码, 获取列表, 抓取图文)
+  - [✓] 微信公众号抓取 (确定路径, 抓取正文)
+  - [ ] 调度与存储 (每日定时, RAG格式, 增量去重)
