@@ -56,7 +56,14 @@ async def download_asset(session, url: str, filepath: str, headers: dict = None)
         logger.error(f"Failed to download {url}: {e}")
     return False
 
-async def save_content(item: ContentItem):
+async def save_content(item: ContentItem, skip_markdown: bool = False) -> str:
+    """
+    Save content to disk.
+    Returns:
+        "success": Metadata and all assets saved successfully.
+        "partial": Metadata saved (or skipped), but some assets failed.
+        "fail": Critical failure (metadata save failed).
+    """
     today_str = datetime.now().strftime("%Y-%m-%d")
     # F:\DataInput\2026-01-13\Douyin\
     base_dir = os.path.join(settings.SAVE_PATH, today_str, item.platform)
@@ -74,6 +81,10 @@ async def save_content(item: ContentItem):
     
     os.makedirs(assets_dir, exist_ok=True)
     
+    # Track success of critical components
+    # We consider audio/video download failure as "incomplete crawl" if they were present
+    all_success = True
+
     # Process Images
     image_paths = []
     if item.images:
@@ -111,6 +122,9 @@ async def save_content(item: ContentItem):
             audio_rel_path = audio_filename
             # Mark as pending transcription in UI/Markdown if needed, 
             # but the existence of the file triggers the processor.
+        else:
+            logger.error(f"Failed to download audio for {item.id}")
+            all_success = False
 
     # Process Video (If needed - XHS video notes)
     video_rel_path = None
@@ -127,23 +141,35 @@ async def save_content(item: ContentItem):
             logger.info(f"Downloaded video: {video_filename}")
         else:
             logger.warning(f"Failed to download video from {item.video_url}")
+            all_success = False
 
     # Render Markdown
-    template = Template(MARKDOWN_TEMPLATE)
-    
-    context = {
-        "item": item,
-        "image_paths": image_paths,
-        "audio_path": audio_rel_path
-    }
-    
-    md_content = template.render(context)
-    
-    # Save Markdown
-    output_filename = f"{folder_name}.md"
-    output_path = os.path.join(post_dir, output_filename)
-    
-    async with aiofiles.open(output_path, "w", encoding="utf-8") as f:
-        await f.write(md_content)
+    if not skip_markdown:
+        template = Template(MARKDOWN_TEMPLATE)
         
-    logger.info(f"Saved content to {output_path}")
+        context = {
+            "item": item,
+            "image_paths": image_paths,
+            "audio_path": audio_rel_path
+        }
+        
+        md_content = template.render(context)
+        
+        # Save Markdown
+        output_filename = f"{folder_name}.md"
+        output_path = os.path.join(post_dir, output_filename)
+        
+        try:
+            async with aiofiles.open(output_path, "w", encoding="utf-8") as f:
+                await f.write(md_content)
+            logger.info(f"Saved content to {output_path}")
+        except Exception as e:
+            logger.error(f"Failed to save markdown to {output_path}: {e}")
+            return "fail"
+    else:
+        logger.info(f"Skipping markdown save for {item.id} (Asset-only mode)")
+
+    if all_success:
+        return "success"
+    else:
+        return "partial"

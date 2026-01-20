@@ -48,7 +48,9 @@ async def run_crawlers(platform_filter: str = None):
                 
                 for item in items:
                     try:
-                        await save_content(item)
+                        status = await save_content(item)
+                        if status != "success":
+                            all_success = False
                     except Exception as e:
                         logger.error(f"Failed to save {item.id} from {crawler.platform_name}: {e}")
                         all_success = False

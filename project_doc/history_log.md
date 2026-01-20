@@ -1,5 +1,35 @@
 # History Record (history_log.md)
 
+## 2026-01-20 16:50 | 引入"Wait"状态优化回填逻辑
+### 1. 问题记录
+用户指出之前的修复（失败即重试）不够完美，希望对于“元数据抓取成功但资源下载失败”的任务，引入一个中间状态（Wait），在下次运行时跳过元数据抓取，仅重试资源下载。
+### 2. 原因分析
+*   **状态粒度不足**: [需求增加] 仅有“已处理”和“未处理”两种状态无法区分“部分成功”的情况，导致重复进行不必要的元数据抓取（如 API 请求、字幕提取等）。{问题确信度: High}
+### 3. 解决方案
+*   **状态定义扩展**: 在 `utils/storage.py` 中，`save_content` 现在返回三种状态：`success`（全成功）、`partial`（元数据成功但资源失败）、`fail`（关键失败）。
+*   **存储逻辑增强**: `save_content` 增加 `skip_markdown` 参数。若设为 `True`，则跳过 Markdown 生成与写入，仅尝试下载缺失的资源。
+*   **回填策略升级**: 更新 `backfill_favorites.py`：
+    *   在 `backfill_state.json` 中增加 `wait_ids` / `wait_urls` 列表。
+    *   遍历时，若 ID 在 `wait_ids` 中，则标记为 `is_wait`。
+    *   对于 B站，若 `is_wait` 为真，跳过字幕提取 API 调用。
+    *   调用 `save_content(item, skip_markdown=is_wait)`。
+    *   根据返回状态动态维护 `processed_ids` 和 `wait_ids`：成功则移入 processed，部分成功则移入/保留在 wait。
+
+---
+
+## 2026-01-20 16:30 | 修复 B站音频下载超时与回填逻辑优化
+### 1. 问题记录
+用户反馈 `backfill_favorites.py` 运行时出现 `_ssl.c:1112: The handshake operation timed out` 错误，导致 B站音频下载失败。且用户担心因下载失败而导致的不完整内容在未来不会被重试。
+### 2. 原因分析
+*   **SSL 超时**: [真实问题原因] `yt-dlp` 默认配置在网络不稳定或特定服务器握手时超时时间过短（默认较短），且缺少模拟浏览器的 Headers 导致连接不稳定。{问题确信度: High}
+*   **状态记录逻辑**: [真实问题原因] 原有的 `backfill_favorites.py` 在调用 `save_content` 后无论成功与否都将 ID 标记为 `processed_ids`，导致失败的任务被永久跳过。{问题确信度: High}
+### 3. 解决方案
+*   **优化 MediaTool**: 在 `utils/media_tool.py` 中将 `yt-dlp` 的 `socket_timeout` 增加至 60秒，并添加 User-Agent 和 Referer 请求头。
+*   **状态反馈机制**: 修改 `utils/storage.py` 的 `save_content` 函数，使其在音频/视频下载失败时返回 `False`。
+*   **回填逻辑调整**: 修改 `backfill_favorites.py`，仅当 `save_content` 返回 `True` 时才将 ID 加入 `processed_ids`，确保失败任务在下次运行时重试。
+
+---
+
 ## 2026-01-15 03:10 | 更新 GitHub README 头图为本地图片
 ### 1. 问题记录
 用户将 `github_demo_picture.jpg` 放在 `pictures` 目录下，希望 GitHub 仓库首页直接展示该实际图片，而不是之前的占位链接。
@@ -98,243 +128,3 @@
 ### 2. 原因分析
 *   **B站下载 412**: [真实问题原因] `crawlers/bilibili.py` 将网页 URL 传给 `storage.py`，后者尝试直接 HTTP GET 下载，触发 B站反爬（需要 Referer/UA）且目标是 HTML 页面而非视频流。{问题确信度: High}
 *   **抖音 Protocol Error**: [真实问题原因] Playwright 在拦截请求时，若页面跳转或资源已释放，调用 `response.json()` 会抛出竞态错误。这是预期内的行为，但在日志中未被正确过滤。{问题确信度: High}
-
-### 3. 解决方案
-1.  **MediaTool 增强**: 在 `utils/media_tool.py` 中增加 `download_video` 方法，集成 `yt-dlp` 以支持从网页 URL 智能提取并下载视频。
-2.  **存储逻辑修正**: 修改 `utils/storage.py`，弃用 `aiohttp` 直接下载视频的逻辑，转为调用 `MediaTool.download_video`，彻底解决 B站及其他平台（如抖音网页版）的视频下载问题。
-3.  **日志降噪**: 优化 `crawlers/douyin.py`，捕获并忽略 Playwright 的 `Protocol error`。
-
----
-
-## 2026-01-13 23:30 | 爬虫异常与功能缺失
-### 1. 问题记录
-1.  **小红书**: 图片没有爬取并保存下来。
-2.  **哔哩哔哩**: 没开放或没有字幕的视频没有识别出对应的字幕并记录。
-3.  **抖音**: 爬虫运行超时，Log显示 `Page.goto: Timeout 60000ms exceeded`。
-4.  **项目结构**: 不同平台爬取内容未分文件夹存储。
-
-### 2. 原因分析
-*   **小红书图片丢失**: [真实问题原因] `utils/storage.py` 下载时未携带 Headers (`User-Agent`, `Referer`) 导致 403 Forbidden。{问题确信度: High}
-*   **哔哩哔哩字幕缺失**: [真实问题原因] 当前仅通过 API 获取官方/CC字幕。无字幕视频需 AI 识别。{问题确信度: High}
-*   **抖音超时**: [真实问题原因] 反爬虫机制检测或 `networkidle` 等待策略过于严格。{问题确信度: Medium}
-
-### 3. 解决方案
-*   **小红书**: 修复 `storage.py` 添加 Headers。
-*   **哔哩哔哩**: 优化 API 获取逻辑；调研 Whisper 本地识别。
-*   **抖音**: 优化 Playwright 等待策略 and 隐匿特征。
-*   **结构**: 修改保存路径增加平台分层。
-
----
-
-## 2026-01-13 19:45 | 需求增加
-### 问题记录
-用户希望能够单独测试特定平台的爬虫效果（如只测试抖音）。
-### 原因分析
-{100%} [需求增加] 当前的 `main.py --now` 会运行所有激活的爬虫，缺乏灵活性。
-### 解决方案
-修改 `main.py`：
-- `run_crawlers` 函数增加 `platform_filter` 参数。
-- CLI 逻辑支持 `python main.py --now [platform]`。
-
----
-
-## 2026-01-14 15:05 | 环境依赖与异步问题
-### 问题记录
-- `yolov5` 环境直接调用 Python 时缺少 OpenSSL DLLs，导致 `_ssl` 加载失败。
-- `MediaTool` 原始实现为同步阻塞，但在异步环境中被 `await` 导致 `TypeError`。
-### 原因分析
-- `yolov5` 环境直接调用 Python 时缺少 OpenSSL DLLs，导致 `_ssl` 加载失败。
-- `whisper.load_model` 和 `model.transcribe` 是计算密集且同步的。
-### 解决方案
-- 手动将 `Library/bin` 下的 `libcrypto` 和 `libssl` DLL 复制到 `DLLs` 目录。
-- 使用 `asyncio.to_thread`
-- 2026-01-14 15:33: [问题解决] 修复 `bilibili.py` 中 `MediaTool.transcribe` 未使用 `await` 的 Bug。
-- 2026-01-14 15:33: [功能验证] 通过 `test_media_tool_async.py` 成功验证异步转写流程，输出正常。
-- 2026-01-14 15:35: [项目进展] B 站本地 Whisper 兜底方案全线打通，环境问题已解决。全部爬虫模块功能指标达成。
-- 2026-01-14 16:40: [文档优化] 细化 `System_Architecture.md`，增加 Whisper 的暂存路径、模型规格、性能预期及自动清理逻辑说明。
-- 2026-01-14 17:10: [功能增强] Whisper 转写已成功切换至 GPU (GTX 3060) 加速。经验证模型运行在 `cuda:0` 设备上。
-- 2026-01-14 18:10: [架构重构] 完成"采集与处理解耦"重构。22:00采集任务仅下载数据，23:00处理任务执行批量GPU转写。存储结构改为"一帖一文件夹"。验证通过 (`test_decoupled.py`)。
-### 项目进展
-- 开始使用含对话的视频 `BV1oViKBeED4` 进行 Whisper 最终验证。
-
----
-
-## 2026-01-12 23:05 | 项目验收
-### 问题记录
-项目验收。
-### 原因分析
-{100%} [验收通过]
-- B站：20条收藏记录成功拉取，字幕文稿完整嵌入 Markdown。
-- 抖音：网络流量捕获到 17 条记录，保存正常。
-- 小红书：成功识别 User ID 并拉取 10 条笔记，正文与图片链接完整。
-- 微信：成功访问 URL 并解析正文。
-### 解决方案
-(此为验收记录，无Fix)
-
----
-
-## 2026-01-12 22:50 | 核心模块执行异常
-### 问题记录
-验证阶段发现多个核心模块执行异常：
-1. `WeChatCrawler` 缺少 Optional 导入。
-2. B站字幕提取报错 需要 cid。
-3. 抖音页面加载超时，且解析 images 时出现 NoneType 报错。
-4. 小红书爬虫因 JS 文件路径依赖 CWD 导致导入失败。
-### 原因分析
-{100%} [真实问题原因]
-- 代码书写疏忽。
-- `bilibili-api-python` 在获取字幕时必须且仅能通过 `get_subtitle(cid=cid)` 传参。
-- 抖音反爬严重，headless 下 networkidle 响应极慢。
-- 小红书 `xhs_util.py` 使用了相对路径加载 `.js` 文件，且其子模块依赖 Node.js 执行。
-### 解决方案
-- 修复 Optional 导入，补充 PyExecJS 等缺失依赖。
-- B站：在视频对象中显式获取并传递 cid。
-- 抖音：放宽超时时间，增加两步导航策略，并增加空值校验。
-- 小红书：在导入和执行阶段通过 `os.chdir` 临时切换工作目录至 XHS 项目根目录，并对 JS 加载路径进行绝对路径化处理。
-- 已完成核心修复 (Timeout, 403, Folder Structure)。
-- 输出 `walkthrough.md` 指导后续使用。
-
----
-
-## 2026-01-14 01:00 | B站字幕缺失问题
-### 问题记录
-用户反馈部分视频（如“程序员YT”、“罗永浩的十字路口”）未抓取到字幕。
-### 原因分析
-{100%} [真实问题原因]
-- Debug 脚本对特定视频 (`BV14eiQBmEbN`) 返回 `Subtitle count: 0`。
-- API 响应中 `subtitles` 列表为空。
-- **关联原因**: B站账号未登录 (Error -101)，匿名访问可能无法获取 AI 生成的字幕。
-### 解决方案
-1.  **第一步 (必须)**: 更新 `BILI_SESSDATA` 恢复登录状态，重新测试。
-2.  **第二步 (备选)**: 若登录后仍无字幕，利用 `bilibili-api` 获取评论区“课代表”总结（通常在置顶或热评）。
-3.  **第三步 (终极)**: 接入 Local Whisper (需 GPU/高性能 CPU)，成本较高。
-
----
-
-## 2026-01-14 01:40 | 环境依赖缺失
-### 问题记录
-尝试安装 `openai-whisper` 和 `yt-dlp` 时失败。
-### 原因分析
-{100%} [真实问题原因]
-- 系统 Python 环境缺失 SSL 模块 (`pip is configured with locations that require TLS/SSL`)。
-- `ffmpeg` 未配置到系统 PATH。
-### 解决方案
-- 代码侧：已实现 `MediaTool` 的防崩溃设计 (ImportError protection)。
-- 用户侧：[已修复] 用户已安装 ffmpeg, openai-whisper, yt-dlp 并配置到 yolov5 环境。
-
----
-
-## 2026-01-14 02:05 | 小红书图片下载缺失
-### 问题记录
-运行 Xiaohongshu 爬虫时，Markdown 生成成功但 assets 文件夹缺失，无图片下载。
-### 原因分析
-{100%} [真实问题原因]
-- API 返回的图片结构（List View）与详情页结构不一致。
-- 代码尝试 `cover.get("url")`，但实际结构为 `cover["info_list"][0]["url"]`。
-- 详情页图片列表同样使用嵌套结构 `info_list`。
-### 解决方案
-- 修改 `crawlers/xhs.py`，增加对 `info_list` 和 `url_default` 的兼容性解析。
-- [已验证] 修复后成功下载 49 张图片到 `Xiaohongshu/assets` 目录。
-
----
-
-## 2026-01-14 00:45 | B站 403 权限错误
-### 问题记录
-运行 `python main.py --now Bilibili` 时报错：`接口 返回错误代码：-403，信息：访问权限不足`。
-### 原因分析
-{100%} [真实问题原因]
-- Debug 脚本返回 `{'code': -101, 'message': '未登录'}`。
-- 确认 `BILI_SESSDATA` Cookie 已失效 or 配置错误。
-### 解决方案
-- **必须** 更新 `.env` 文件中的 `BILI_SESSDATA`。
-- 建议用户在浏览器无痕模式登录 B站，F12 获取最新 SESSDATA。
----
-
-## 2026-01-14 20:15 | 小红书视频下载与环境兼容性修复
-### 1. 问题记录
-1.  **抖音**: 之前的抓取项为0，是因为 Cookie 失效。
-2.  **小红书**: 缺失视频下载功能。
-3.  **小红书**: 在 `yolov5` 环境下运行出现 `SSLError` (EOF) 和 `ProxyError` (FileNotFound)。
-4.  **架构**: 存储结构与基类过滤逻辑不一致。
-
-### 2. 原因分析
-*   **抖音 Cookie**: [真实问题原因] 登录态过期导致无法截获收藏 API。{问题确信度: High}
-*   **小红书视频**: [真实问题原因] 核心逻辑中未包含视频下载实现。{问题确信度: High}
-*   **SSL 错误**: [真实问题原因] `yolov5` 环境下的 OpenSSL 与小红书 API 握手协议不匹配。{问题确信度: High}
-*   **Proxy 错误**: [真实问题原因] Windows 系统代理配置冲突，requests 尝试连接不存在的代理。{问题确信度: High}
-
-### 3. 解决方案
-*   **抖音**: 用户更新 `DOUYIN_COOKIE` 后恢复抓取（捕获 52 项）。
-*   **小红书视频**: 在 `storage.py` 中增加基于 `aiohttp` 的流式视频下载逻辑。
-*   **SSL/Proxy 修复**: 
-    - 在 `xhs_pc_apis.py` 中全量增加 `verify=False`。
-    - 在 `xhs.py` 中增加 `os.environ['NO_PROXY'] = '*'` 禁用系统代理。
-*   **架构同步**: 更新 `crawlers/base.py` 使 `filter_existing` 兼容新的"一帖一文件夹"路径。
-*   **验证**: 成功下载小红书视频（`video.mp4`），数据结构符合预期。
-
----
-
-## 2026-01-14 20:25 | 需求增加：视频转译支持
-### 1. 问题记录
-用户需求：数据处理模块需增加对小红书视频模态的支持。
-### 2. 原因分析
-{100%} [需求增加] 当前处理模块仅扫描 `.wav` 文件。小红书视频需要先从 `.mp4` 提取音频再进行转写。
-### 3. 解决方案
-1.  **MediaTool**: 增加 `extract_audio` 方法，利用 `ffmpeg` 提取 16kHz 单声道 WAV。
-2.  **Processor**: 修改扫描逻辑，支持 `video.mp4` -> `extract_audio` -> `transcribe`流程。
-3.  **验证**: [2026-01-14 20:28] 已在小红书视频贴成功验证。提取出 `audio.wav` 并生成了完整的 AI 转写文本。
-
----
-
-## 2026-01-14 21:45 | 需求增加：图片 OCR 支持
-### 1. 问题记录
-用户需求：小红书图文帖子需要识别图片中的文字并存入 Markdown。
-### 2. 原因分析
-{100%} [需求增加] 现有的处理流程仅覆盖音视频转译，图文帖子的核心信息（图片上的文字）尚未提取。
-### 3. 解决方案
-1.  **方案评判**: 对比 EasyOCR 与 PaddleOCR，结合用户环境（CUDA 11.6）选择 EasyOCR。
-2.  **MediaTool**: 增加 `OCRTool` 支持 GPU 加速识别。
-3.  **Processor**: 扫描 `assets/` 目录并更新 MD。
-4.  **验证**: [2026-01-14 22:15] 已成功完成全流程验证。
-    - **兼容性**: 通过 Monkeypatch 解决了 Torch 1.12 与 EasyOCR 1.7.2 的 `weights_only` 参数冲突。
-    - **路径处理**: 解决了 Windows 下 OpenCV 无法读取中文路径图片的问题。
-    - **结果**: 小红书图文贴中的文字已被准确识别并追加至 Markdown。
-
----
-
-## 2026-01-14 22:45 | 系统健壮性：异常识别与用户引导
-### 1. 问题记录
-爬虫在 Cookie 过期或网络故障时报错不直观，用户难以定位原因。
-### 2. 原因分析
-{100%} [真实问题原因] 之前的代码多采用静默失败或仅记录 DEBUG log，终端输出不够显眼。
-### 3. 解决方案
-1.  **统一提醒**: 在 `BaseCrawler` 增加 `handle_auth_error`，终端输出醒目的红色提醒并指向 `README_CONFIG.md`。
-2.  **分平台增强**: B站增加 `check_valid()` 验证，抖音增加登录页重定向捕获，小红书增加 Proxy/SSL 异常诊断提示。
-3.  **依赖自检**: `MediaTool` 启动检查 `ffmpeg`。
-4.  **验证**: 通过模拟故障确认，B站和 XHS 的高可见度提示均已生效。
-
----
-
-## 2026-01-14 23:35 | 跨日期全局去重方案实现
-### 1. 问题记录
-用户希望实现“跨日期全局去重”，避免每天运行时重复下载以前已经抓取过的内容。
-### 2. 原因分析
-{100%} [需求增加] 当前系统仅检查“当日”文件夹是否存在，若收藏内容不变，次日运行会再次抓取已存内容。
-### 3. 解决方案
-1.  **Sync-Point 策略**: 利用 API 返回循序（由近及远）的特性。
-2.  **状态管理**: 实现 `StateManager` 工具类，读写 `crawl_state.json` 记录各平台最新处理的作品 ID。
-3.  **有序截断**: 所有爬虫在采集过程中，一旦探测到记录中的 `limit_id` 即刻停止扫描后续内容。
-4.  **原子更新**: 仅在本次所有新项保存成功后才更新同步点，确保不漏抓。
-5.  **验证**: 通过 `test_sync_dedup.py` 模拟多轮同步，验证了增量获取逻辑的准确性。
-
----
-
-## 2026-01-15 00:05 | 自动化部署与定时任务支持
-### 1. 问题记录
-用户需要一种在 Windows 上定时自动运行爬虫的稳健方案。
-### 2. 原因分析
-{100%} [需求增加] 纯靠 Python 脚本内部调度（`run_forever`）在电脑重启或进程崩溃后难以自动恢复。利用 Windows 系统级的“任务计划程序”更加可靠。
-### 3. 解决方案
-1.  **特定入口脚本**: 创建了 `run_daily_crawl.bat` 与 `run_daily_process.bat`。
-2.  **配置简化**: 脚本预置了正确的 Conda 环境激活 (`yolov5`) 和 CLI 参数，用户只需在 Windows 任务计划程序中选择对应的 `.bat` 文件即可。
-3.  **文档对齐**: 更新了 `walkthrough.md` 中的配置指南。

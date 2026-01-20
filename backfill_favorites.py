@@ -103,6 +103,7 @@ async def backfill_bilibili(limit: int, state: BackfillState):
     pn = int(st.get("pn", total_pages)) if st else total_pages
     idx = int(st.get("idx", -1)) if st else -1
     processed_ids: Set[str] = set(st.get("processed_ids", [])) if st else set()
+    wait_ids: Set[str] = set(st.get("wait_ids", [])) if st else set()
     processed_before = len(processed_ids)
     processed_this_run = 0
     while processed_this_run < limit and pn >= 1:
@@ -154,11 +155,18 @@ async def backfill_bilibili(limit: int, state: BackfillState):
                 if bvid in processed_ids:
                     idx -= 1
                     continue
+                
+                is_wait = bvid in wait_ids
+                
                 intro = m.get("intro") or ""
                 cover = m.get("cover") or ""
                 upper = (m.get("upper") or {}).get("name") or ""
                 pubtime = m.get("pubtime") or 0
-                subtitle_text = await crawler._get_subtitle_text(bvid, session=sub_session)
+                
+                subtitle_text = ""
+                if not is_wait:
+                    subtitle_text = await crawler._get_subtitle_text(bvid, session=sub_session)
+                
                 item = ContentItem(
                     platform=crawler.platform_name,
                     id=str(bvid),
@@ -174,9 +182,19 @@ async def backfill_bilibili(limit: int, state: BackfillState):
                     audio_url=f"https://www.bilibili.com/video/{bvid}" if not subtitle_text else None,
                     audio_file=None,
                 )
-                await save_content(item)
-                processed_ids.add(str(bvid))
-                processed_this_run += 1
+                
+                status = await save_content(item, skip_markdown=is_wait)
+                
+                if status == "success":
+                    processed_ids.add(str(bvid))
+                    if str(bvid) in wait_ids:
+                        wait_ids.remove(str(bvid))
+                    processed_this_run += 1
+                elif status == "partial":
+                    wait_ids.add(str(bvid))
+                    if str(bvid) in processed_ids:
+                        processed_ids.remove(str(bvid))
+                
                 idx -= 1
         if idx < 0:
             pn -= 1
@@ -190,6 +208,7 @@ async def backfill_bilibili(limit: int, state: BackfillState):
             "media_id": crawler.media_id,
             "total_count": media_count,
             "processed_ids": list(processed_ids),
+            "wait_ids": list(wait_ids),
         },
     )
     logger.info(f"Bilibili 本次成功爬取收藏夹内容: {processed_this_run} 条")
@@ -210,6 +229,7 @@ async def backfill_xhs(limit: int, state: BackfillState):
         xhs_state: Dict[str, Any] = dict(st) if st else {}
         cursor = str(xhs_state.get("cursor", "")) if xhs_state else ""
         processed_ids: Set[str] = set(xhs_state.get("processed_ids", [])) if xhs_state else set()
+        wait_ids: Set[str] = set(xhs_state.get("wait_ids", [])) if xhs_state else set()
         total_count = xhs_state.get("total_count")
         def compute_total_collect_count() -> int:
             local_cursor = ""
@@ -246,17 +266,40 @@ async def backfill_xhs(limit: int, state: BackfillState):
         while processed_this_run < limit:
             success, msg, res_json = crawler.api.get_user_collect_note_info(user_id, current_cursor, crawler.cookies)
             if not success:
+                logger.error(f"Xiaohongshu API request failed: {msg}")
                 break
-            notes = (res_json or {}).get("data", {}).get("notes", []) or []
+            
+            data = (res_json or {}).get("data", {}) or {}
+            notes = data.get("notes", []) or []
+            has_more = bool(data.get("has_more"))
+            next_cursor = str(data.get("cursor") or "")
+            
             if not notes:
+                logger.info("Xiaohongshu: No more notes found.")
                 break
+            
+            # 记录这一页是否所有内容都被跳过（都是已处理的）
+            # 如果整页都跳过了，我们必须手动强制使用 API 返回的 next_cursor 继续翻页
+            # 否则因为 current_cursor 在循环中只更新为“已处理”的 note_id，可能会卡住
+            all_skipped = True
+            
+            # 为了回填逻辑（从旧到新存），我们使用 reversed
+            # 但要注意：API 的分页依赖 correct cursor。
+            # 通常 API 返回的 notes 列表，最后一个元素的 ID 或者是 data.get("cursor") 是获取下一页的凭证。
+            # 无论我们在这一页里怎么遍历（正序或倒序），下一页的请求 cursor 应该是确定的。
+            
             for note in reversed(notes):
                 note_id = note.get("note_id")
                 if not note_id:
                     continue
+                
                 if str(note_id) in processed_ids:
-                    current_cursor = note_id
+                    # 即使跳过，也要更新一下临时 cursor，防止 break 后死循环（虽然下面会用 next_cursor 覆盖）
                     continue
+                
+                is_wait = str(note_id) in wait_ids
+                
+                all_skipped = False
                 title = note.get("display_title") or ""
                 cover_dict = note.get("cover", {}) or {}
                 cover_url = None
@@ -312,17 +355,43 @@ async def backfill_xhs(limit: int, state: BackfillState):
                         "Referer": "https://www.xiaohongshu.com/"
                     }
                 )
-                await save_content(item)
-                processed_ids.add(str(note_id))
-                processed_this_run += 1
-                current_cursor = note_id
+                status = await save_content(item, skip_markdown=is_wait)
+                
+                if status == "success":
+                    processed_ids.add(str(note_id))
+                    if str(note_id) in wait_ids:
+                        wait_ids.remove(str(note_id))
+                    processed_this_run += 1
+                elif status == "partial":
+                    wait_ids.add(str(note_id))
+                    if str(note_id) in processed_ids:
+                        processed_ids.remove(str(note_id))
+                
+                # 在循环内部，不需要更新 current_cursor 给下一页用，
+                # 因为下一页的 cursor 应该由 API 响应决定 (next_cursor)。
+                # 但我们需要更新状态以便中断后恢复。
+                # 如果我们用 reversed，那么“最旧”的那个 note_id 并不是下一页的 cursor。
+                # 下一页 cursor 是这一页“最后”也就是“最旧”的那个（正序的最后一个）。
+                
                 if processed_this_run >= limit:
                     break
+            
+            # 翻页逻辑：
+            # 1. 如果还有更多 (has_more) 且 cursor 有效，则继续。
+            # 2. 无论这一页是否处理了数据（可能全跳过），都要翻页。
+            if has_more and next_cursor:
+                current_cursor = next_cursor
+            else:
+                logger.info("Xiaohongshu: Reached end of favorites.")
+                break
+                
             if processed_this_run >= limit:
                 break
+
         cumulative = len(processed_ids)
         xhs_state["cursor"] = current_cursor
         xhs_state["processed_ids"] = list(processed_ids)
+        xhs_state["wait_ids"] = list(wait_ids)
         if total_count is not None:
             xhs_state["total_count"] = total_count
         state.update("Xiaohongshu", xhs_state)
@@ -348,18 +417,33 @@ async def backfill_douyin(limit: int, state: BackfillState):
     items_sorted = sorted(items, key=lambda x: to_ts(x.publish_time))
     st = state.get("Douyin")
     processed_ids: Set[str] = set(st.get("processed_ids", [])) if st else set()
+    wait_ids: Set[str] = set(st.get("wait_ids", [])) if st else set()
     before = len(processed_ids)
     processed_this_run = 0
     for item in items_sorted:
         if item.id in processed_ids:
             continue
-        await save_content(item)
-        processed_ids.add(item.id)
-        processed_this_run += 1
+        
+        is_wait = item.id in wait_ids
+        status = await save_content(item, skip_markdown=is_wait)
+        
+        if status == "success":
+            processed_ids.add(item.id)
+            if item.id in wait_ids:
+                wait_ids.remove(item.id)
+            processed_this_run += 1
+        elif status == "partial":
+            wait_ids.add(item.id)
+            if item.id in processed_ids:
+                processed_ids.remove(item.id)
+            
         if processed_this_run >= limit:
             break
     cumulative = len(processed_ids)
-    state.update("Douyin", {"processed_ids": list(processed_ids)})
+    state.update("Douyin", {
+        "processed_ids": list(processed_ids),
+        "wait_ids": list(wait_ids)
+    })
     logger.info(f"Douyin 本次成功爬取收藏夹内容: {processed_this_run} 条")
     logger.info(f"Douyin 累计已爬取收藏夹内容: {cumulative} 条（总数未知）")
 
@@ -375,6 +459,7 @@ async def backfill_wechat(limit: int, state: BackfillState):
     total_urls = len(urls)
     st = state.get("WeChat")
     processed_urls = set(st.get("processed_urls", [])) if st else set()
+    wait_urls = set(st.get("wait_urls", [])) if st else set()
     remaining = [u for u in urls if u not in processed_urls]
     if not remaining:
         return
@@ -390,16 +475,29 @@ async def backfill_wechat(limit: int, state: BackfillState):
             try:
                 item = await crawler._parse_article(page, url)
                 if item:
-                    await save_content(item)
-                    processed_urls.add(url)
-                    processed += 1
+                    is_wait = url in wait_urls
+                    status = await save_content(item, skip_markdown=is_wait)
+                    
+                    if status == "success":
+                        processed_urls.add(url)
+                        if url in wait_urls:
+                            wait_urls.remove(url)
+                        processed += 1
+                    elif status == "partial":
+                        wait_urls.add(url)
+                        if url in processed_urls:
+                            processed_urls.remove(url)
+
                 if processed >= limit:
                     break
             except Exception:
                 pass
         await browser.close()
     cumulative = len(processed_urls)
-    state.update("WeChat", {"processed_urls": list(processed_urls)})
+    state.update("WeChat", {
+        "processed_urls": list(processed_urls),
+        "wait_urls": list(wait_urls)
+    })
     logger.info(f"WeChat 收藏列表总数: {total_urls} 条")
     logger.info(f"WeChat 本次成功爬取收藏夹内容: {processed} 条")
     logger.info(f"WeChat 累计已爬取收藏夹内容: {cumulative}/{total_urls} 条")

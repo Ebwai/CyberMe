@@ -80,9 +80,12 @@ graph TD
     3.  调用 `MediaTool.transcribe_file(path)` (GPU加速)。
     4.  读取同目录下的 `.md` 文件，将结果追加到 "字幕/文稿" 区域。
 
-### 3.3 媒体处理模块 (`utils/media_tool.py`)
-- **定位**: 跨平台通用媒体工具，目前主要用于 B 站转写。
-- **核心技术**: `yt-dlp` (音频提取), `openai-whisper` (语音识别)。
+### 3.4 媒体处理模块 (`utils/media_tool.py`)
+- **定位**: 跨平台通用媒体工具，目前主要用于 B 站转写及各平台视频下载。
+- **核心技术**: `yt-dlp` (音频/视频提取), `openai-whisper` (语音识别)。
+- **增强特性**: 
+    - **网络健壮性**: 集成 User-Agent/Referer 伪装，支持 60s 超时设置与自动重试 (retries=20)，解决 B 站音频下载 SSL 超时问题。
+    - **同步下载**: 提供 `_sync_download_video` 和 `_sync_download_audio` 核心方法。
 - **路径定义**:
     - **音频暂存**: `F:\Spider_proj\temp` (存放 `.wav` 中间文件)。
     - **模型存储**: `F:\Spider_proj\models` (存放 Whisper 模型权重)。

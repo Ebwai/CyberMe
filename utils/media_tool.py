@@ -102,7 +102,14 @@ class MediaTool:
             'merge_output_format': 'mp4',
             'quiet': True,
             'no_warnings': True,
-            # Add headers if needed, but usually yt-dlp handles it
+            'socket_timeout': 60,  # Increase timeout to 60s
+            'retries': 20,         # Increase retries
+            'fragment_retries': 20,
+            # Add headers to mimic browser
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Referer': 'https://www.bilibili.com/',
+            }
         }
 
         try:
@@ -171,6 +178,13 @@ class MediaTool:
             }],
             'quiet': True,
             'no_warnings': True,
+            'socket_timeout': 60,  # Increase timeout
+            'retries': 20,         # Increase retries
+            'fragment_retries': 20,
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Referer': 'https://www.bilibili.com/',
+            }
         }
 
         try:
