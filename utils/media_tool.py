@@ -74,7 +74,7 @@ class MediaTool:
         return await asyncio.to_thread(MediaTool._sync_download_audio, url, target_path)
 
     @staticmethod
-    async def download_video(url: str, target_path: str) -> bool:
+    async def download_video(url: str, target_path: str, headers: dict = None) -> bool:
         """
         Download video from a URL using yt-dlp to a specific path.
         Returns True if successful.
@@ -82,10 +82,10 @@ class MediaTool:
         if not WHISPER_AVAILABLE:
             return False
 
-        return await asyncio.to_thread(MediaTool._sync_download_video, url, target_path)
+        return await asyncio.to_thread(MediaTool._sync_download_video, url, target_path, headers)
 
     @staticmethod
-    def _sync_download_video(url: str, target_path: str) -> bool:
+    def _sync_download_video(url: str, target_path: str, headers: dict = None) -> bool:
         dir_name = os.path.dirname(target_path)
         file_name = os.path.basename(target_path)
         base_name, _ = os.path.splitext(file_name)
@@ -96,6 +96,14 @@ class MediaTool:
         # but yt-dlp determines extension based on format.
         # We use 'merge_output_format': 'mp4' to encourage mp4.
         
+        default_headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Referer': 'https://www.bilibili.com/',
+        }
+        
+        # Use provided headers or default
+        use_headers = headers if headers else default_headers
+
         ydl_opts = {
             'format': 'bestvideo+bestaudio/best',
             'outtmpl': os.path.join(dir_name, f"{base_name}.%(ext)s"),
@@ -105,11 +113,11 @@ class MediaTool:
             'socket_timeout': 60,  # Increase timeout to 60s
             'retries': 20,         # Increase retries
             'fragment_retries': 20,
+            # Network stability improvements
+            'force_ipv4': True,    # Force IPv4 to avoid IPv6 timeouts
+            'http_chunk_size': 10485760, # 10MB chunk size
             # Add headers to mimic browser
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Referer': 'https://www.bilibili.com/',
-            }
+            'http_headers': use_headers
         }
 
         try:
@@ -168,6 +176,22 @@ class MediaTool:
         # To force the exact filename:
         output_template = os.path.join(dir_name, f"{base_name}") # yt-dlp might add extension
         
+        # Construct headers
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Referer': url, # Use the video URL as referer to avoid anti-hotlinking
+        }
+        
+        # Inject Bilibili cookies if available and target is Bilibili
+        # This helps avoid throttling/read timeouts for unauthenticated users
+        if "bilibili.com" in url and settings.BILI_SESSDATA:
+            cookie_parts = [f"SESSDATA={settings.BILI_SESSDATA}"]
+            if settings.BILI_JCT:
+                cookie_parts.append(f"bili_jct={settings.BILI_JCT}")
+            if settings.BILI_BUVID3:
+                cookie_parts.append(f"buvid3={settings.BILI_BUVID3}")
+            headers['Cookie'] = "; ".join(cookie_parts)
+
         ydl_opts = {
             'format': 'bestaudio/best',
             'outtmpl': output_template + '.%(ext)s',
@@ -181,10 +205,10 @@ class MediaTool:
             'socket_timeout': 60,  # Increase timeout
             'retries': 20,         # Increase retries
             'fragment_retries': 20,
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Referer': 'https://www.bilibili.com/',
-            }
+            # Network stability improvements
+            'force_ipv4': True,    # Force IPv4
+            'http_chunk_size': 10485760, # 10MB chunk size
+            'http_headers': headers
         }
 
         try:

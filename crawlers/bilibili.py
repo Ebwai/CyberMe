@@ -99,6 +99,10 @@ class BiliCrawler(BaseCrawler):
             return ""
 
         except Exception as e:
+            e_str = str(e)
+            if "啥都木有" in e_str or "稿件不可见" in e_str or "-404" in e_str or "62002" in e_str:
+                self.logger.warning(f"Video {bvid} is invalid/deleted: {e_str}")
+                return "INVALID_VIDEO"
             self.logger.warning(f"Failed to get subtitle for {bvid}: {e}")
         
         return ""
@@ -148,6 +152,10 @@ class BiliCrawler(BaseCrawler):
                     # Get Subtitle
                     subtitle_text = await self._get_subtitle_text(bvid, session=session)
                     
+                    is_invalid = subtitle_text == "INVALID_VIDEO"
+                    if is_invalid:
+                        subtitle_text = "" # Clear magic string for storage
+
                     # Construct Item
                     item = ContentItem(
                         platform=self.platform_name,
@@ -162,7 +170,8 @@ class BiliCrawler(BaseCrawler):
                         images=[cover] if cover else [],
                         video_url=None, # Disable video download as per user request (only audio needed for transcription if no subtitle)
                         # If subtitle is empty, we trigger audio download for transcription
-                        audio_url=f"https://www.bilibili.com/video/{bvid}" if not subtitle_text else None,
+                        # BUT if video is invalid, we do NOT try to download audio
+                        audio_url=f"https://www.bilibili.com/video/{bvid}" if (not subtitle_text and not is_invalid) else None,
                         audio_file=None # Handled by storage
                     )
                     potential_items.append(item)

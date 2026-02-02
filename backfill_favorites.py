@@ -164,8 +164,12 @@ async def backfill_bilibili(limit: int, state: BackfillState):
                 pubtime = m.get("pubtime") or 0
                 
                 subtitle_text = ""
+                is_invalid = False
                 if not is_wait:
                     subtitle_text = await crawler._get_subtitle_text(bvid, session=sub_session)
+                    if subtitle_text == "INVALID_VIDEO":
+                        is_invalid = True
+                        subtitle_text = ""
                 
                 item = ContentItem(
                     platform=crawler.platform_name,
@@ -179,12 +183,25 @@ async def backfill_bilibili(limit: int, state: BackfillState):
                     subtitle=subtitle_text,
                     images=[cover] if cover else [],
                     video_url=None,
-                    audio_url=f"https://www.bilibili.com/video/{bvid}" if not subtitle_text else None,
+                    audio_url=f"https://www.bilibili.com/video/{bvid}" if (not subtitle_text and not is_invalid) else None,
                     audio_file=None,
                 )
                 
                 status = await save_content(item, skip_markdown=is_wait)
                 
+                # 如果是失效视频，即便save_content返回success(因为没有audio_url，只要metadata保存成功就success)，
+                # 也会被加入processed_ids。
+                # 如果save_content返回fail（比如markdown保存失败），那还是fail。
+                # 关键是不要进入 wait_ids。
+                # 由于 is_invalid 时 audio_url 为 None，save_content 通常会返回 success (除非图片下载失败)
+                # 即使图片失败返回 partial，我们也应该强制视为 success 吗？
+                # 用户说“不要把这些视频放入wait_ids了”，意味着应该视为“已处理”或“忽略”。
+                # 最好的方式是：如果 is_invalid，我们强制认为它处理成功（或者至少不进 wait）。
+                
+                if is_invalid:
+                     # 强制标记为成功，避免进入 wait_ids，从而跳过未来的重试
+                     status = "success"
+
                 if status == "success":
                     processed_ids.add(str(bvid))
                     if str(bvid) in wait_ids:

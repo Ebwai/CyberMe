@@ -17,6 +17,7 @@
 - `save_content`: 验证 Markdown 格式与 YAML Frontmatter。
 #### 媒体处理模块
 - `extract_audio`: 验证能否从 MP4 提取音频。
+- `OCRTool`: 验证 EasyOCR 模型加载及图片文字识别准确率。
 
 ### 1.2 集成测试
 #### 全流程运行

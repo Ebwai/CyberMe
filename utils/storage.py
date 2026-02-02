@@ -134,7 +134,7 @@ async def save_content(item: ContentItem, skip_markdown: bool = False) -> str:
         
         # Use MediaTool (yt-dlp) for robust video downloading
         # This handles both webpage URLs (Bilibili/Douyin) and direct links (XHS)
-        success = await MediaTool.download_video(item.video_url, video_filepath)
+        success = await MediaTool.download_video(item.video_url, video_filepath, headers=item.download_headers)
         
         if success:
             video_rel_path = video_filename

@@ -77,6 +77,16 @@ graph TD
         - 输入: `assets/*.jpg`
         - 输出: 文本字符串。
         - 逻辑: 调用 EasyOCR `reader.readtext`。
+        - **工作流程**:
+            1. 懒加载 `OCRTool.get_reader()`，初始化 EasyOCR 模型（支持 GPU 加速）。
+            2. 遍历小红书帖子目录下的 `assets` 文件夹，获取所有图片。
+            3. 对每张图片执行 `reader.readtext(image_path, detail=0)`，提取纯文本。
+            4. 将提取结果拼接，并以 `[OCR Content]` 标记追加到 Markdown 文件末尾。
+        - **选型理由 (EasyOCR)**:
+            - **高识别率**: 基于 PyTorch 深度学习框架，对复杂背景、不规则排列的中文识别效果优于传统 Tesseract。
+            - **GPU 加速**: 原生支持 CUDA 加速，适合本地批量处理大量图片。
+            - **轻量易用**: 相比 PaddleOCR 等工业级库，EasyOCR API 简洁，依赖较少，易于集成到 Python 项目中。
+            - **多语言支持**: 内置支持简体中文 (`ch_sim`) 和英文 (`en`) 混合识别，契合小红书内容特性。
     3.  调用 `MediaTool.transcribe_file(path)` (GPU加速)。
     4.  读取同目录下的 `.md` 文件，将结果追加到 "字幕/文稿" 区域。
 
@@ -85,6 +95,7 @@ graph TD
 - **核心技术**: `yt-dlp` (音频/视频提取), `openai-whisper` (语音识别)。
 - **增强特性**: 
     - **网络健壮性**: 集成 User-Agent/Referer 伪装，支持 60s 超时设置与自动重试 (retries=20)，解决 B 站音频下载 SSL 超时问题。
+    - **认证透传**: 自动注入 Bilibili Cookie (SESSDATA) 与动态 Referer，解决因反爬策略导致的下载限流与超时。
     - **同步下载**: 提供 `_sync_download_video` 和 `_sync_download_audio` 核心方法。
 - **路径定义**:
     - **音频暂存**: `F:\Spider_proj\temp` (存放 `.wav` 中间文件)。
