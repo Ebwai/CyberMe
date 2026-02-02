@@ -21,3 +21,6 @@ __pycache__/
 
 # large or temporary data files
 *.wav
+
+# project documentation ignored
+project_doc/history_log.md
