@@ -268,7 +268,7 @@ python backfill_favorites.py
 python backfill_favorites.py --platforms Bilibili,Xiaohongshu
 
 # 仅补抖音，且每次只补 5 条，方便观察效果
-python backfill_favorites.py --platforms Douyin --limit-douyin 5
+
 ```
 
 脚本运行日志会写入 `logs/backfill_YYYY-MM-DD.log`，方便你观察进度。

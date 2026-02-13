@@ -15,6 +15,9 @@ from crawlers.wechat import WeChatCrawler
 from bilibili_api import favorite_list
 import argparse
 import sys
+import urllib3
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 STATE_FILE = os.path.join(settings.SAVE_PATH, "backfill_state.json")
 
@@ -236,8 +239,145 @@ async def backfill_xhs(limit: int, state: BackfillState):
     if not crawler.api:
         return
     from crawlers.xhs import XHS_PROJECT_PATH
+    logger.info(f"Using XHS_PROJECT_PATH: {XHS_PROJECT_PATH}")
     old_cwd = os.getcwd()
     os.chdir(XHS_PROJECT_PATH)
+
+    # Patch xhs_util to use Chrome headers instead of hardcoded Edge headers
+    try:
+        import xhs_utils.xhs_util
+        import apis.xhs_pc_apis
+        import execjs
+        
+        # 0. Patch JS to fix encoding issues (replace Greek Iota)
+        patched_js_path = os.path.join(old_cwd, "static", "xhs_xs_xsc_56_patched.js")
+        if os.path.exists(patched_js_path):
+            try:
+                with open(patched_js_path, "r", encoding="utf-8") as f:
+                    js_content = f.read()
+                xhs_utils.xhs_util.js = execjs.compile(js_content)
+                logger.info(f"Successfully patched xhs_util.js with content from {patched_js_path}")
+            except Exception as e:
+                logger.error(f"Failed to patch JS: {e}")
+        else:
+            logger.warning(f"Patched JS file not found at {patched_js_path}, using default")
+
+        # 1. Patch Headers
+        def get_request_headers_template_patched():
+            # Patch to match Chrome 122 (consistent with xhs_util.get_common_headers)
+            return {
+                "authority": "edith.xiaohongshu.com",
+                "accept": "application/json, text/plain, */*",
+                "accept-language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+                "cache-control": "no-cache",
+                "content-type": "application/json;charset=UTF-8",
+                "origin": "https://www.xiaohongshu.com",
+                "pragma": "no-cache",
+                "referer": "https://www.xiaohongshu.com/",
+                "sec-ch-ua": "\"Chromium\";v=\"122\", \"Not(A:Brand\";v=\"24\", \"Google Chrome\";v=\"122\"",
+                "sec-ch-ua-mobile": "?0",
+                "sec-ch-ua-platform": "\"Windows\"",
+                "sec-fetch-dest": "empty",
+                "sec-fetch-mode": "cors",
+                "sec-fetch-site": "same-site",
+                "sec-fetch-user": "?1",
+                "upgrade-insecure-requests": "1",
+                "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                "x-b3-traceid": "",
+                "x-mns": "unload",
+                "x-s": "",
+                "x-s-common": "",
+                "x-t": "",
+                "x-xray-traceid": xhs_utils.xhs_util.generate_xray_traceid()
+            }
+
+        xhs_utils.xhs_util.get_request_headers_template = get_request_headers_template_patched
+        logger.info(f"Successfully patched xhs_util.get_request_headers_template with Chrome 122 headers (UA: {settings.XHS_USER_AGENT})")
+
+        # 2. Patch API method to remove verify=False and ensure headers are used
+        original_get_user_collect_note_info = apis.xhs_pc_apis.XHS_Apis.get_user_collect_note_info
+        
+        def get_user_collect_note_info_patched(self, user_id: str, cursor: str, cookies_str: str, xsec_token='', xsec_source='', proxies: dict = None):
+            logger.info(f"Patched get_user_collect_note_info called for user {user_id}")
+            res_json = None
+            try:
+                api = f"/api/sns/web/v2/note/collect/page"
+                params = {
+                    "num": "30",
+                    "cursor": cursor,
+                    "user_id": user_id,
+                    "image_formats": "jpg,webp,avif",
+                    "xsec_token": xsec_token,
+                    "xsec_source": xsec_source,
+                }
+                splice_api = xhs_utils.xhs_util.splice_str(api, params)
+                headers, cookies, data = xhs_utils.xhs_util.generate_request_params(cookies_str, splice_api, '', 'GET')
+                
+                # Debug: Log headers
+                logger.debug(f"Request Headers: {json.dumps(headers, indent=2, ensure_ascii=False)}")
+                
+                # Remove verify=False to avoid InsecureRequestWarning and potential fingerprinting
+                response = requests.get(self.base_url + splice_api, headers=headers, cookies=cookies, proxies=proxies)
+                
+                res_json = response.json()
+                success = res_json.get("success", False)
+                msg = res_json.get("msg", "")
+                
+                if response.status_code == 461:
+                    logger.warning(f"Patched API: Got 461. Response: {res_json}")
+            except Exception as e:
+                success = False
+                msg = str(e)
+                logger.error(f"Patched API Error: {e}")
+            return success, msg, res_json
+
+        apis.xhs_pc_apis.XHS_Apis.get_user_collect_note_info = get_user_collect_note_info_patched
+        logger.info(f"Successfully patched apis.xhs_pc_apis.XHS_Apis.get_user_collect_note_info")
+        
+        # Test the patch immediately
+        test_headers = xhs_utils.xhs_util.get_request_headers_template()
+        logger.info(f"Test Patched Headers (sec-ch-ua): {test_headers.get('sec-ch-ua')}")
+        
+    except Exception as e:
+        logger.error(f"Failed to patch xhs_util headers: {e}")
+
+    import requests
+    # Monkeypatch requests.get to intercept 461 errors and enforce User-Agent
+    _original_get = requests.get
+    def patched_get(*args, **kwargs):
+        # Enforce User-Agent for Xiaohongshu
+        if len(args) > 0 and "xiaohongshu.com" in args[0]:
+            headers = kwargs.get("headers", {}) or {}
+            if settings.XHS_USER_AGENT:
+                headers["user-agent"] = settings.XHS_USER_AGENT
+            kwargs["headers"] = headers
+            
+            # EXPERIMENTAL: Try to enable SSL verification to avoid TLS fingerprinting
+            if "verify" in kwargs and kwargs["verify"] is False:
+                 del kwargs["verify"] 
+
+        try:
+            resp = _original_get(*args, **kwargs)
+        except requests.exceptions.SSLError:
+            # Fallback if SSL fails
+            if "verify" not in kwargs:
+                 logger.warning("SSL Verification failed. Retrying with verify=False (Risk of 461)...")
+                 kwargs["verify"] = False
+                 resp = _original_get(*args, **kwargs)
+            else:
+                 raise
+
+        if resp.status_code == 461:
+            logger.warning(f"XHS API returned 461 (Verification Required) for URL: {args[0]}")
+            logger.warning(f"Headers sent: {json.dumps(kwargs.get('headers', {}), indent=2, ensure_ascii=False)}")
+            logger.warning(f"Response Body (First 500 chars): {resp.text[:500]}")
+        return resp
+    requests.get = patched_get
+
+    # Also patch requests.post if needed, but we mostly use get for collections
+    # xhs_pc_apis.py uses post for homefeed, but get for collect/page
+
+
     try:
         user_id = await crawler._get_my_user_id()
         if not user_id:
@@ -280,6 +420,7 @@ async def backfill_xhs(limit: int, state: BackfillState):
         processed_before = len(processed_ids)
         processed_this_run = 0
         current_cursor = cursor
+        logger.info(f"Xiaohongshu: Starting crawl with cursor: '{current_cursor}'")
         while processed_this_run < limit:
             success, msg, res_json = crawler.api.get_user_collect_note_info(user_id, current_cursor, crawler.cookies)
             if not success:
@@ -292,7 +433,12 @@ async def backfill_xhs(limit: int, state: BackfillState):
             next_cursor = str(data.get("cursor") or "")
             
             if not notes:
-                logger.info("Xiaohongshu: No more notes found.")
+                if success and not data:
+                    logger.warning("Xiaohongshu: API returned success=True but empty data.")
+                    logger.warning("POSSIBLE CAUSE: Status Code 461 (Verification Required).")
+                    logger.warning(f"SOLUTION: Please open https://www.xiaohongshu.com/user/profile/{user_id} in your browser and complete the verification/slider.")
+                else:
+                    logger.info("Xiaohongshu: No more notes found.")
                 break
             
             # 记录这一页是否所有内容都被跳过（都是已处理的）

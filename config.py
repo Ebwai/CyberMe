@@ -20,6 +20,7 @@ class Settings(BaseSettings):
 
     # Xiaohongshu
     XHS_COOKIE: str = ""
+    XHS_USER_AGENT: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     
     # WeChat
     WECHAT_URLS_FILE: str = r"F:\DataInput\wechat_urls.txt"
@@ -34,6 +35,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = 'utf-8'
+        extra = 'ignore'
 
 @lru_cache()
 def get_settings():

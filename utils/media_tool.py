@@ -7,23 +7,27 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
+YT_DLP_AVAILABLE = False
 WHISPER_AVAILABLE = False
+
 try:
     import yt_dlp
+    YT_DLP_AVAILABLE = True
+except ImportError:
+    pass
+
+try:
     import whisper
     WHISPER_AVAILABLE = True
-except Exception as e:
-    logger.warning(f"MediaTool dependencies check failed: {e}")
-    # traceback is better but we don't want to spam if it's just missing
-    # logger.exception(e) 
-
+except ImportError as e:
+    logger.warning(f"Whisper import failed: {e}")
 
 class MediaTool:
     _model = None
 
     @classmethod
     def is_available(cls) -> bool:
-        if not WHISPER_AVAILABLE:
+        if not (YT_DLP_AVAILABLE or WHISPER_AVAILABLE):
             return False
             
         # Check for ffmpeg
@@ -68,7 +72,8 @@ class MediaTool:
         Download audio from a video URL using yt-dlp to a specific path.
         Returns True if successful.
         """
-        if not WHISPER_AVAILABLE:
+        if not YT_DLP_AVAILABLE:
+            logger.error("yt-dlp is not available. Cannot download audio.")
             return False
 
         return await asyncio.to_thread(MediaTool._sync_download_audio, url, target_path)
@@ -79,7 +84,8 @@ class MediaTool:
         Download video from a URL using yt-dlp to a specific path.
         Returns True if successful.
         """
-        if not WHISPER_AVAILABLE:
+        if not YT_DLP_AVAILABLE:
+            logger.error("yt-dlp is not available. Cannot download video.")
             return False
 
         return await asyncio.to_thread(MediaTool._sync_download_video, url, target_path, headers)

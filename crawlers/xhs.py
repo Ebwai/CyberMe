@@ -11,7 +11,8 @@ import asyncio
 os.environ['NO_PROXY'] = '*'
 
 # Add Spider_XHS to sys.path
-XHS_PROJECT_PATH = r"f:\project\spider_Unit\local_knowledge_base\Spider_XHS"
+XHS_PROJECT_PATH = r"F:\project\spider_Unit\local_knowledge_base\Spider_XHS"
+
 if XHS_PROJECT_PATH not in sys.path:
     sys.path.append(XHS_PROJECT_PATH)
 

@@ -6,6 +6,7 @@
 #### 小红书模块
 - `get_my_user_id`: 验证 Cookie 是否有效并拉取 ID。
 - `get_user_collect_note_info`: 能否获取收藏夹数据。
+- **反爬验证**: 模拟 461 响应，验证警告日志输出及程序退出行为。
 - `get_note_info`: 能否提取详情、正文、图片链接。
 #### B站模块
 - `get_video_favorite_list_content`: 能否获取列表。
