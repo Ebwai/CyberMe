@@ -20,7 +20,10 @@
   - [x] 前期先使用内网穿透的方案，以N8N为中转站去控制连接所有的系统和硬件。
 
 ---
-❗❗❗**目前项目中最简单部署且对效率提升最大的部分见**[A-project](https://github.com/Ebwai/A-project) ，已实现对邮箱的自动阅读-->处理-->通知-->重要事项加入日历，效率提升显著，欢迎尝试。[EduEmail_WorkFlow](https://github.com/Ebwai/A-project/tree/main/EduEmail%20Workflow) ，同时另一个A-project的demo是将粗糙的原始文本-->AI针对不同社交平台就行风格化+补全元素-->自动分发到指定的社交平台[Social_Spread](https://github.com/Ebwai/A-project/tree/main/SocialSpread_Workflow)
+❗❗❗
+
+**目前项目中最简单部署且对效率提升最大的部分见**[A-project](https://github.com/Ebwai/A-project) ，已实现对邮箱的自动阅读-->处理-->通知-->重要事项加入日历，效率提升显著，欢迎尝试。[EduEmail_WorkFlow](https://github.com/Ebwai/A-project/tree/main/EduEmail%20Workflow) ，同时另一个A-project的demo是将粗糙的原始文本-->AI针对不同社交平台就行风格化+补全元素-->自动分发到指定的社交平台[Social_Spread](https://github.com/Ebwai/A-project/tree/main/SocialSpread_Workflow)
+
 ---
 
 **CyberMe存在的意义：**
