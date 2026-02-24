@@ -18,8 +18,9 @@
   - [x] 代替你去阅读随时发来的邮箱，处理并推送到你常用的社交平台上。
 - [ ] **第四阶段：身体独立** (H-project)【计算本地化+物理世界**实践**与交互的能力】--- (🚧 仍在建设中，雏形可以参考我的本科毕设[Smart_Home_Agent](https://github.com/Ebwai/Smart_Home_Agent)（虽然极度粗糙，并且构想远远不止于此，成熟的时候会开源出来）)
   - [x] 前期先使用内网穿透的方案，以N8N为中转站去控制连接所有的系统和硬件。
-
-❗❗❗目前项目中最简单部署且对效率提升最大的部分见[A-project](https://github.com/Ebwai/A-project) ，已实现对邮箱的自动阅读-->处理-->通知-->重要事项加入日历，效率提升显著，欢迎尝试。[EduEmail_WorkFlow](https://github.com/Ebwai/A-project/tree/main/EduEmail%20Workflow) ，同时另一个A-project的demo是将粗糙的原始文本-->AI针对不同社交平台就行风格化+补全元素-->自动分发到指定的社交平台[Social_Spread](https://github.com/Ebwai/A-project/tree/main/SocialSpread_Workflow)
+---
+❗❗❗**目前项目中最简单部署且对效率提升最大的部分见**[A-project](https://github.com/Ebwai/A-project) ，已实现对邮箱的自动阅读-->处理-->通知-->重要事项加入日历，效率提升显著，欢迎尝试。[EduEmail_WorkFlow](https://github.com/Ebwai/A-project/tree/main/EduEmail%20Workflow) ，同时另一个A-project的demo是将粗糙的原始文本-->AI针对不同社交平台就行风格化+补全元素-->自动分发到指定的社交平台[Social_Spread](https://github.com/Ebwai/A-project/tree/main/SocialSpread_Workflow)
+---
 
 **CyberMe存在的意义：**
 - 背景：最近有很多很火的产品（比如豆包手机, OpenClawd, Kimi Agent集群），这个项目是不是和他们有重复呢？
